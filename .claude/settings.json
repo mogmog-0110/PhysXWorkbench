@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "grepai": {
+      "command": "C:\\Users\\KAWAMURA Yuya\\go\\bin\\grepai.exe",
+      "args": ["mcp-serve"],
+      "cwd": "C:\\Users\\KAWAMURA Yuya\\dev\\PhysXWorkbench"
+    }
+  }
+}
