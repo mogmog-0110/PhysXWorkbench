@@ -114,7 +114,6 @@ PhysXWorkbench.exe
 |------------|-------------|
 | `PhysXWorkbench.exe` | Main application with DX12 rendering and full features |
 | `PhysXWorkbenchConsole.exe` | Console-only version for headless simulation |
-| `PhysXWorkbenchOmniPVD.exe` | Version with OmniPVD debugging support |
 
 ## Controls
 

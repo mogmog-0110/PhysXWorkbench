@@ -40,7 +40,6 @@ add_library(ImGui STATIC
 
 # 実行ファイル作成
 add_executable(PhysXWorkbenchConsole src/main.cpp)
-add_executable(PhysXWorkbenchOmniPVD src/main_omnipvd.cpp)
 add_executable(PhysXWorkbench WIN32
     src/main_dx12.cpp
     src/dx12/DX12Renderer.cpp
@@ -102,21 +101,6 @@ target_link_libraries(PhysXWorkbenchConsole
     $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PhysXPvdSDK_static_64.lib>
 )
 
-target_link_libraries(PhysXWorkbenchOmniPVD
-    $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PhysX_64.lib>
-    $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PhysX_64.lib>
-    $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PhysXCommon_64.lib>
-    $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PhysXCommon_64.lib>
-    $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PhysXFoundation_64.lib>
-    $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PhysXFoundation_64.lib>
-    $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PhysXExtensions_static_64.lib>
-    $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PhysXExtensions_static_64.lib>
-    $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PhysXPvdSDK_static_64.lib>
-    $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PhysXPvdSDK_static_64.lib>
-    $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PVDRuntime_64.lib>
-    $<$<CONFIG:Release>:${PHYSX_LIB_DIR}/release/PVDRuntime_64.lib>
-)
-
 # DirectX 12 メインアプリケーション用のライブラリリンク
 target_link_libraries(PhysXWorkbench
     $<$<CONFIG:Debug>:${PHYSX_LIB_DIR}/debug/PhysX_64.lib>
@@ -154,24 +138,6 @@ add_custom_command(TARGET PhysXWorkbenchConsole POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${PHYSX_LIB_DIR}/$<CONFIG>/PVDRuntime_64.dll"
         $<TARGET_FILE_DIR:PhysXWorkbenchConsole>
-)
-
-add_custom_command(TARGET PhysXWorkbenchOmniPVD POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PHYSX_LIB_DIR}/$<CONFIG>/PhysX_64.dll"
-        $<TARGET_FILE_DIR:PhysXWorkbenchOmniPVD>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PHYSX_LIB_DIR}/$<CONFIG>/PhysXCommon_64.dll"
-        $<TARGET_FILE_DIR:PhysXWorkbenchOmniPVD>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PHYSX_LIB_DIR}/$<CONFIG>/PhysXFoundation_64.dll"
-        $<TARGET_FILE_DIR:PhysXWorkbenchOmniPVD>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PHYSX_LIB_DIR}/$<CONFIG>/PhysXCooking_64.dll"
-        $<TARGET_FILE_DIR:PhysXWorkbenchOmniPVD>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PHYSX_LIB_DIR}/$<CONFIG>/PVDRuntime_64.dll"
-        $<TARGET_FILE_DIR:PhysXWorkbenchOmniPVD>
 )
 
 add_custom_command(TARGET PhysXWorkbench POST_BUILD
