@@ -1,0 +1,411 @@
+void DX12Renderer::RenderImGui(PxScene* scene, float deltaTime, PxCudaContextManager* cudaContextManager,
+                               SimulationRecorder* recorder, PerformanceProfiler* profiler,
+                               ExperimentController* controller, PxMaterial* material)
+{
+    // Start the Dear ImGui frame
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    // Main menu bar at the top
+    if (ImGui::BeginMainMenuBar())
+    {
+        if (ImGui::BeginMenu("File"))
+        {
+            if (ImGui::MenuItem("Take Screenshot", "F12"))
+            {
+                CaptureScreenshot("screenshot.png");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Exit", "Alt+F4")) { /* User handles window close */ }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Simulation"))
+        {
+            if (controller)
+            {
+                bool paused = controller->IsPaused();
+                if (ImGui::MenuItem(paused ? "Resume" : "Pause", "Space", &paused))
+                {
+                    controller->TogglePause();
+                }
+
+                if (ImGui::MenuItem("Reset Scene", "R"))
+                {
+                    controller->RequestReset();
+                }
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("View"))
+        {
+            ImGui::MenuItem("Velocity Vectors", nullptr, &m_showVelocityVectors);
+            ImGui::MenuItem("Collision Points", nullptr, &m_showCollisions);
+            ImGui::MenuItem("Trajectory Trails", nullptr, &m_showTrajectories);
+            ImGui::EndMenu();
+        }
+
+        // FPS display in menu bar (right-aligned)
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 150);
+        ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
+        ImGui::EndMainMenuBar();
+    }
+
+    // Main control panel (docked to the right side)
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 380, 25), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(375, ImGui::GetIO().DisplaySize.y - 30), ImGuiCond_FirstUseEver);
+
+    ImGui::Begin("Control Panel", nullptr, ImGuiWindowFlags_NoMove);
+
+    if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_None))
+    {
+        // ===== SIMULATION TAB =====
+        if (ImGui::BeginTabItem("Simulation"))
+        {
+            ImGui::SeparatorText("Scene Info");
+
+            if (scene)
+            {
+                PxU32 nbActors = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC | PxActorTypeFlag::eRIGID_STATIC);
+                PxU32 nbDynamic = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+                PxU32 nbStatic = scene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+
+                ImGui::Text("Total Actors: %d", nbActors);
+                ImGui::Text("  Dynamic: %d", nbDynamic);
+                ImGui::Text("  Static: %d", nbStatic);
+            }
+
+            ImGui::SeparatorText("Physics Settings");
+
+            if (scene)
+            {
+                PxVec3 gravity = scene->getGravity();
+                float gravityY = gravity.y;
+                if (ImGui::SliderFloat("Gravity Y", &gravityY, -20.0f, 0.0f))
+                {
+                    scene->setGravity(PxVec3(gravity.x, gravityY, gravity.z));
+                }
+            }
+
+            if (material)
+            {
+                float friction = material->getStaticFriction();
+                if (ImGui::SliderFloat("Static Friction", &friction, 0.0f, 1.0f))
+                {
+                    material->setStaticFriction(friction);
+                    material->setDynamicFriction(friction);
+                }
+
+                float restitution = material->getRestitution();
+                if (ImGui::SliderFloat("Restitution", &restitution, 0.0f, 1.0f))
+                {
+                    material->setRestitution(restitution);
+                }
+            }
+
+            ImGui::SeparatorText("Time Control");
+
+            if (controller)
+            {
+                if (ImGui::Button(controller->IsPaused() ? "Resume (Space)" : "Pause (Space)", ImVec2(-1, 0)))
+                {
+                    controller->TogglePause();
+                }
+
+                bool stepMode = controller->IsStepMode();
+                if (ImGui::Checkbox("Step Mode", &stepMode))
+                {
+                    controller->EnableStepMode(stepMode);
+                }
+
+                if (stepMode)
+                {
+                    if (ImGui::Button("Step Forward (->)", ImVec2(-1, 0)))
+                    {
+                        controller->StepForward();
+                    }
+                }
+
+                float timeScale = controller->GetTimeScale();
+                if (ImGui::SliderFloat("Time Scale", &timeScale, 0.1f, 2.0f))
+                {
+                    controller->SetTimeScale(timeScale);
+                }
+
+                if (ImGui::Button("Reset Scene (R)", ImVec2(-1, 0)))
+                {
+                    controller->RequestReset();
+                }
+            }
+
+            ImGui::SeparatorText("GPU Acceleration");
+
+            if (cudaContextManager && cudaContextManager->contextIsValid())
+            {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "GPU PhysX: ENABLED");
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Physics calculations run on CUDA");
+                }
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "GPU PhysX: DISABLED");
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Running on CPU only");
+                }
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        // ===== VISUALIZATION TAB =====
+        if (ImGui::BeginTabItem("Visualization"))
+        {
+            ImGui::SeparatorText("Rendering");
+
+            bool useInstancing = m_useInstancing;
+            if (ImGui::Checkbox("Use Instanced Rendering", &useInstancing))
+            {
+                m_useInstancing = useInstancing;
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Batch identical meshes for better performance");
+            }
+
+            ImGui::Text("Cached Meshes: %zu", meshCache.size());
+
+            ImGui::SeparatorText("Velocity Vectors");
+
+            ImGui::Checkbox("Show Velocity Vectors", &m_showVelocityVectors);
+
+            if (m_showVelocityVectors)
+            {
+                ImGui::SliderFloat("Vector Scale", &m_velocityScale, 0.1f, 5.0f);
+                ImGui::TextColored(ImVec4(0.0f, 0.5f, 1.0f, 1.0f), "Blue"); ImGui::SameLine();
+                ImGui::Text("= Slow");
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Yellow"); ImGui::SameLine();
+                ImGui::Text("= Medium");
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Red"); ImGui::SameLine();
+                ImGui::Text("= Fast");
+            }
+
+            ImGui::SeparatorText("Collision Visualization");
+
+            ImGui::Checkbox("Show Collision Points", &m_showCollisions);
+
+            if (m_showCollisions)
+            {
+                ImGui::Text("Active Points: %zu", m_collisionPoints.size());
+
+                if (ImGui::Button("Clear Collisions"))
+                {
+                    ClearCollisionPoints();
+                }
+            }
+
+            ImGui::SeparatorText("Trajectory Trails");
+
+            ImGui::Checkbox("Show Trajectory Trails", &m_showTrajectories);
+
+            if (m_showTrajectories)
+            {
+                ImGui::Text("Active Trails: %zu", m_trajectories.size());
+
+                ImGui::SliderFloat("Update Rate (Hz)", &m_trajectoryUpdateInterval, 0.02f, 0.2f);
+                ImGui::Text("Samples/sec: %.1f", 1.0f / m_trajectoryUpdateInterval);
+
+                ImGui::SliderFloat("Trail Duration (s)", &m_trajectoryMaxDuration, 0.5f, 10.0f);
+
+                if (ImGui::Button("Clear Trajectories"))
+                {
+                    ClearTrajectories();
+                }
+            }
+
+            ImGui::SeparatorText("Camera");
+
+            XMFLOAT3 camPos = camera.GetPosition();
+            ImGui::Text("Position:");
+            ImGui::Text("  X: %.2f  Y: %.2f  Z: %.2f", camPos.x, camPos.y, camPos.z);
+            ImGui::Text("Controls:");
+            ImGui::BulletText("Right Mouse: Orbit");
+            ImGui::BulletText("Middle Mouse: Pan");
+            ImGui::BulletText("Mouse Wheel: Zoom");
+            ImGui::BulletText("WASD/QE: Pan Target");
+
+            ImGui::EndTabItem();
+        }
+
+        // ===== RECORDING TAB =====
+        if (ImGui::BeginTabItem("Recording"))
+        {
+            ImGui::SeparatorText("Screenshot");
+
+            if (ImGui::Button("Take Screenshot (F12)", ImVec2(-1, 0)))
+            {
+                CaptureScreenshot("screenshot.png");
+            }
+
+            ImGui::SeparatorText("Sequential Capture");
+
+            bool sequentialCapture = m_sequentialCaptureEnabled;
+            if (ImGui::Checkbox("Enable Sequential Capture", &sequentialCapture))
+            {
+                m_sequentialCaptureEnabled = sequentialCapture;
+                if (sequentialCapture)
+                {
+                    m_captureFrameCount = 0;
+                    m_frameCounter = 0;
+                }
+            }
+
+            if (m_sequentialCaptureEnabled)
+            {
+                ImGui::Text("Captured: %d frames", m_captureFrameCount);
+
+                int captureInterval = m_captureInterval;
+                if (ImGui::SliderInt("Capture Interval", &captureInterval, 1, 60))
+                {
+                    m_captureInterval = captureInterval;
+                }
+
+                ImGui::Text("Output: capture_NNNNNN.png");
+
+                if (ImGui::TreeNode("Video Creation"))
+                {
+                    ImGui::Text("Use ffmpeg to create video:");
+                    ImGui::TextWrapped("ffmpeg -i capture_%%06d.png video.mp4");
+                    ImGui::TreePop();
+                }
+            }
+
+            ImGui::SeparatorText("Simulation Recording");
+
+            if (recorder)
+            {
+                if (!recorder->IsRecording())
+                {
+                    if (ImGui::Button("Start Recording", ImVec2(-1, 0)))
+                    {
+                        recorder->StartRecording("simulation_recording.json");
+                    }
+                }
+                else
+                {
+                    ImGui::Text("Recording...");
+                    ImGui::Text("Frames: %d", recorder->GetFrameCount());
+
+                    if (ImGui::Button("Stop Recording", ImVec2(-1, 0)))
+                    {
+                        recorder->StopRecording();
+                    }
+                }
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        // ===== PERFORMANCE TAB =====
+        if (ImGui::BeginTabItem("Performance"))
+        {
+            ImGui::SeparatorText("Frame Stats");
+
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+            ImGui::Text("Frame Time: %.3f ms", deltaTime * 1000.0f);
+
+            ImGui::Separator();
+
+            if (profiler)
+            {
+                ImGui::Text("Simulation: %.3f ms", profiler->GetSimulationTime() * 1000.0f);
+                ImGui::Text("Rendering: %.3f ms", profiler->GetRenderingTime() * 1000.0f);
+
+                ImGui::Separator();
+
+                if (ImGui::TreeNode("History"))
+                {
+                    const auto& history = profiler->GetFrameHistory();
+                    if (!history.empty())
+                    {
+                        std::vector<float> fpsData;
+                        std::vector<float> simData;
+                        std::vector<float> renderData;
+
+                        for (const auto& frame : history)
+                        {
+                            fpsData.push_back(1.0f / frame.deltaTime);
+                            simData.push_back(frame.simulationTime * 1000.0f);
+                            renderData.push_back(frame.renderTime * 1000.0f);
+                        }
+
+                        ImGui::PlotLines("FPS", fpsData.data(), (int)fpsData.size(), 0, nullptr, 0.0f, 120.0f, ImVec2(0, 80));
+                        ImGui::PlotLines("Sim (ms)", simData.data(), (int)simData.size(), 0, nullptr, 0.0f, 33.0f, ImVec2(0, 80));
+                        ImGui::PlotLines("Render (ms)", renderData.data(), (int)renderData.size(), 0, nullptr, 0.0f, 33.0f, ImVec2(0, 80));
+                    }
+                    ImGui::TreePop();
+                }
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        // ===== EXPERIMENT TAB =====
+        if (ImGui::BeginTabItem("Experiment"))
+        {
+            ImGui::SeparatorText("Parameter Presets");
+
+            if (controller)
+            {
+                std::vector<std::string> presets = controller->GetPresetNames();
+
+                for (const auto& preset : presets)
+                {
+                    if (ImGui::Button(preset.c_str(), ImVec2(-1, 0)))
+                    {
+                        controller->LoadPreset(preset);
+                    }
+                }
+
+                ImGui::Separator();
+
+                static char presetName[64] = "";
+                ImGui::InputText("Preset Name", presetName, sizeof(presetName));
+
+                if (ImGui::Button("Save Current as Preset", ImVec2(-1, 0)))
+                {
+                    if (strlen(presetName) > 0)
+                    {
+                        controller->SavePreset(presetName);
+                        presetName[0] = '\0';
+                    }
+                }
+            }
+
+            ImGui::SeparatorText("Batch Experiments");
+
+            ImGui::TextWrapped("Future feature: Run multiple experiments with varying parameters automatically.");
+
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
+    }
+
+    ImGui::End();
+
+    // Rendering
+    ImGui::Render();
+
+    // Set ImGui descriptor heap
+    ID3D12DescriptorHeap* heaps[] = { imguiSrvHeap.Get() };
+    commandList->SetDescriptorHeaps(1, heaps);
+
+    // Render ImGui
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
+}

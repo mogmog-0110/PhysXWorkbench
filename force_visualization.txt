@@ -1,0 +1,134 @@
+
+//=============================================================================
+// Force Visualization Implementation
+//=============================================================================
+
+void DX12Renderer::AddContactForce(const PxVec3& position, const PxVec3& force)
+{
+    ContactForce cf;
+    cf.position = XMFLOAT3(position.x, position.y, position.z);
+    cf.force = XMFLOAT3(force.x, force.y, force.z);
+    cf.timeStamp = static_cast<float>(ImGui::GetTime());
+    m_contactForces.push_back(cf);
+}
+
+void DX12Renderer::RenderForces(PxScene* scene)
+{
+    if (!m_showForces) return;
+
+    // Render contact forces
+    RenderContactForces();
+
+    // Render gravity forces for all dynamic actors
+    RenderGravityForces(scene);
+}
+
+void DX12Renderer::RenderContactForces()
+{
+    float currentTime = static_cast<float>(ImGui::GetTime());
+
+    // Remove old contact forces
+    m_contactForces.erase(
+        std::remove_if(m_contactForces.begin(), m_contactForces.end(),
+            [this, currentTime](const ContactForce& cf) {
+                return (currentTime - cf.timeStamp) > m_forceDisplayDuration;
+            }),
+        m_contactForces.end()
+    );
+
+    // Render contact force arrows
+    for (const auto& cf : m_contactForces)
+    {
+        XMFLOAT3 start = cf.position;
+        XMFLOAT3 end = XMFLOAT3(
+            start.x + cf.force.x * m_forceScale,
+            start.y + cf.force.y * m_forceScale,
+            start.z + cf.force.z * m_forceScale
+        );
+
+        // Color based on force magnitude
+        float forceMag = sqrtf(cf.force.x * cf.force.x + cf.force.y * cf.force.y + cf.force.z * cf.force.z);
+        XMFLOAT3 color;
+        if (forceMag < 100.0f)
+        {
+            color = XMFLOAT3(0.0f, 1.0f, 0.0f); // Green for small forces
+        }
+        else if (forceMag < 500.0f)
+        {
+            color = XMFLOAT3(1.0f, 1.0f, 0.0f); // Yellow for medium forces
+        }
+        else
+        {
+            color = XMFLOAT3(1.0f, 0.0f, 0.0f); // Red for large forces
+        }
+
+        // Create and render the force arrow
+        auto lineMesh = std::make_unique<RenderMesh>(CreateLineMesh(start, end, color));
+
+        XMMATRIX world = XMMatrixIdentity();
+        UpdateConstantBuffer(world);
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+        commandList->IASetVertexBuffers(0, 1, &lineMesh->vertexBufferView);
+        commandList->IASetIndexBuffer(&lineMesh->indexBufferView);
+        commandList->DrawIndexedInstanced(lineMesh->indexCount, 1, 0, 0, 0);
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        dynamicMeshCache[frameIndex].push_back(std::move(lineMesh));
+    }
+}
+
+void DX12Renderer::RenderGravityForces(PxScene* scene)
+{
+    if (!scene) return;
+
+    PxU32 nbActors = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    if (nbActors == 0) return;
+
+    std::vector<PxRigidActor*> actors(nbActors);
+    scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC,
+                     reinterpret_cast<PxActor**>(&actors[0]), nbActors);
+
+    PxVec3 gravity = scene->getGravity();
+
+    for (PxU32 i = 0; i < nbActors; i++)
+    {
+        PxRigidDynamic* dynamicActor = actors[i]->is<PxRigidDynamic>();
+        if (!dynamicActor) continue;
+
+        // Get actor mass
+        float mass = dynamicActor->getMass();
+        if (mass < 0.001f) continue;  // Skip very light objects
+
+        // Calculate gravity force
+        PxVec3 gravityForce = gravity * mass;
+
+        // Get actor position
+        PxTransform transform = dynamicActor->getGlobalPose();
+        XMFLOAT3 start(transform.p.x, transform.p.y, transform.p.z);
+        XMFLOAT3 end(
+            start.x + gravityForce.x * m_forceScale,
+            start.y + gravityForce.y * m_forceScale,
+            start.z + gravityForce.z * m_forceScale
+        );
+
+        // Gravity forces are shown in blue
+        XMFLOAT3 color(0.0f, 0.5f, 1.0f);
+
+        // Create and render the gravity arrow
+        auto lineMesh = std::make_unique<RenderMesh>(CreateLineMesh(start, end, color));
+
+        XMMATRIX world = XMMatrixIdentity();
+        UpdateConstantBuffer(world);
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+        commandList->IASetVertexBuffers(0, 1, &lineMesh->vertexBufferView);
+        commandList->IASetIndexBuffer(&lineMesh->indexBufferView);
+        commandList->DrawIndexedInstanced(lineMesh->indexCount, 1, 0, 0, 0);
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        dynamicMeshCache[frameIndex].push_back(std::move(lineMesh));
+    }
+}

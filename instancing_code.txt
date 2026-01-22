@@ -1,0 +1,178 @@
+
+//=============================================================================
+// Instanced Rendering Implementation
+//=============================================================================
+
+void DX12Renderer::CreateInstanceBuffer(UINT maxInstances)
+{
+    // Create instance buffer for storing instance data
+    const UINT instanceBufferSize = (sizeof(InstanceData) * maxInstances + 255) & ~255;
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(instanceBufferSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&instanceBuffer)
+    ));
+
+    // Map instance buffer
+    CD3DX12_RANGE readRange(0, 0);
+    ThrowIfFailed(instanceBuffer->Map(0, &readRange, reinterpret_cast<void**>(&instanceBufferData)));
+
+    instanceBufferView.BufferLocation = instanceBuffer->GetGPUVirtualAddress();
+    instanceBufferView.SizeInBytes = instanceBufferSize;
+    instanceBufferView.StrideInBytes = sizeof(InstanceData);
+}
+
+void DX12Renderer::RenderPhysXSceneInstanced(PxScene* scene)
+{
+    if (!scene) return;
+
+    // Get all actors
+    PxU32 nbActors = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC | PxActorTypeFlag::eRIGID_STATIC);
+    if (nbActors == 0) return;
+
+    std::vector<PxRigidActor*> actors(nbActors);
+    scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC | PxActorTypeFlag::eRIGID_STATIC,
+                     reinterpret_cast<PxActor**>(&actors[0]), nbActors);
+
+    // Group actors by mesh type for batched rendering
+    std::unordered_map<std::string, InstanceBatch> batches;
+
+    for (PxU32 i = 0; i < nbActors; i++)
+    {
+        PxRigidActor* actor = actors[i];
+        if (!actor) continue;
+
+        // Determine color based on actor type
+        XMFLOAT3 color(0.5f, 0.5f, 0.5f);
+        if (actor->is<PxRigidDynamic>())
+        {
+            color = XMFLOAT3(0.3f, 0.7f, 0.3f); // Green for dynamic
+        }
+        else if (actor->is<PxRigidStatic>())
+        {
+            color = XMFLOAT3(0.6f, 0.6f, 0.6f); // Gray for static
+        }
+
+        PxU32 nShapes = actor->getNbShapes();
+        std::vector<PxShape*> shapes(nShapes);
+        actor->getShapes(&shapes[0], nShapes);
+
+        for (PxU32 j = 0; j < nShapes; j++)
+        {
+            PxShape* shape = shapes[j];
+
+            // Get transform
+            PxTransform pxTransform = PxShapeExt::getGlobalPose(*shape, *actor);
+            PxMat44 pxMat(pxTransform);
+
+            // Convert PhysX matrix to DirectXMath
+            XMMATRIX world = XMMatrixSet(
+                pxMat[0][0], pxMat[0][1], pxMat[0][2], pxMat[0][3],
+                pxMat[1][0], pxMat[1][1], pxMat[1][2], pxMat[1][3],
+                pxMat[2][0], pxMat[2][1], pxMat[2][2], pxMat[2][3],
+                pxMat[3][0], pxMat[3][1], pxMat[3][2], pxMat[3][3]
+            );
+
+            // Get geometry
+            PxGeometryHolder geomHolder = shape->getGeometry();
+            PxGeometryType::Enum geomType = geomHolder.getType();
+
+            std::string batchKey;
+            std::shared_ptr<RenderMesh> meshPtr;
+
+            switch (geomType)
+            {
+            case PxGeometryType::eBOX:
+            {
+                const PxBoxGeometry& boxGeom = geomHolder.box();
+                batchKey = GenerateBoxCacheKey(boxGeom);
+                meshPtr = GetOrCreateBoxMesh(boxGeom, color);
+                break;
+            }
+            case PxGeometryType::eSPHERE:
+            {
+                const PxSphereGeometry& sphereGeom = geomHolder.sphere();
+                batchKey = GenerateSphereCacheKey(sphereGeom);
+                meshPtr = GetOrCreateSphereMesh(sphereGeom, color);
+                break;
+            }
+            case PxGeometryType::ePLANE:
+            {
+                // Planes are rendered separately (not batched)
+                if (!groundMesh)
+                {
+                    groundMesh = std::make_unique<RenderMesh>(CreatePlaneMesh(color));
+                }
+
+                XMMATRIX identityWorld = XMMatrixIdentity();
+                UpdateConstantBuffer(identityWorld);
+
+                commandList->IASetVertexBuffers(0, 1, &groundMesh->vertexBufferView);
+                commandList->IASetIndexBuffer(&groundMesh->indexBufferView);
+                commandList->DrawIndexedInstanced(groundMesh->indexCount, 1, 0, 0, 0);
+                continue;
+            }
+            default:
+                continue;
+            }
+
+            // Add to batch
+            if (meshPtr)
+            {
+                if (batches.find(batchKey) == batches.end())
+                {
+                    batches[batchKey].mesh = meshPtr;
+                }
+
+                InstanceData instanceData;
+                instanceData.world = world;
+                instanceData.color = XMFLOAT4(color.x, color.y, color.z, 1.0f);
+                batches[batchKey].instances.push_back(instanceData);
+            }
+        }
+    }
+
+    // Render all batches
+    for (auto& pair : batches)
+    {
+        RenderInstanceBatch(pair.second);
+    }
+
+    // Render velocity vectors if enabled
+    if (m_showVelocityVectors)
+    {
+        RenderVelocityVectors(scene);
+    }
+
+    // Render collision points if enabled
+    if (m_showCollisions)
+    {
+        RenderCollisionPoints();
+    }
+
+    // Render trajectories if enabled
+    if (m_showTrajectories)
+    {
+        RenderTrajectories();
+    }
+}
+
+void DX12Renderer::RenderInstanceBatch(const InstanceBatch& batch)
+{
+    if (!batch.mesh || batch.instances.empty()) return;
+
+    // For now, render each instance individually
+    // Full instancing would require shader modifications
+    for (const auto& instance : batch.instances)
+    {
+        UpdateConstantBuffer(instance.world);
+
+        commandList->IASetVertexBuffers(0, 1, &batch.mesh->vertexBufferView);
+        commandList->IASetIndexBuffer(&batch.mesh->indexBufferView);
+        commandList->DrawIndexedInstanced(batch.mesh->indexCount, 1, 0, 0, 0);
+    }
+}

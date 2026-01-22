@@ -1,0 +1,74 @@
+
+//=============================================================================
+// Line Mesh Creation
+//=============================================================================
+
+RenderMesh DX12Renderer::CreateLineMesh(const XMFLOAT3& start, const XMFLOAT3& end, const XMFLOAT3& color)
+{
+    RenderMesh mesh;
+    mesh.color = color;
+
+    // Create line vertices
+    Vertex vertices[2];
+    vertices[0].position = start;
+    vertices[0].normal = XMFLOAT3(0, 1, 0);
+    vertices[0].color = color;
+
+    vertices[1].position = end;
+    vertices[1].normal = XMFLOAT3(0, 1, 0);
+    vertices[1].color = color;
+
+    // Create indices
+    UINT indices[2] = { 0, 1 };
+
+    // Create vertex buffer
+    const UINT vertexBufferSize = sizeof(vertices);
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&mesh.vertexBuffer)
+    ));
+
+    // Copy vertex data
+    UINT8* pVertexDataBegin;
+    CD3DX12_RANGE readRange(0, 0);
+    ThrowIfFailed(mesh.vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
+    memcpy(pVertexDataBegin, vertices, vertexBufferSize);
+    mesh.vertexBuffer->Unmap(0, nullptr);
+
+    // Initialize vertex buffer view
+    mesh.vertexBufferView.BufferLocation = mesh.vertexBuffer->GetGPUVirtualAddress();
+    mesh.vertexBufferView.StrideInBytes = sizeof(Vertex);
+    mesh.vertexBufferView.SizeInBytes = vertexBufferSize;
+
+    // Create index buffer
+    const UINT indexBufferSize = sizeof(indices);
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&mesh.indexBuffer)
+    ));
+
+    // Copy index data
+    UINT8* pIndexDataBegin;
+    ThrowIfFailed(mesh.indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
+    memcpy(pIndexDataBegin, indices, indexBufferSize);
+    mesh.indexBuffer->Unmap(0, nullptr);
+
+    // Initialize index buffer view
+    mesh.indexBufferView.BufferLocation = mesh.indexBuffer->GetGPUVirtualAddress();
+    mesh.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+    mesh.indexBufferView.SizeInBytes = indexBufferSize;
+
+    mesh.indexCount = 2;
+
+    return mesh;
+}

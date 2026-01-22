@@ -1,37 +1,59 @@
-# PhysX DirectX 12 Rendering Tool
+# PhysXWorkbench
 
-A real-time physics simulation visualization tool built with NVIDIA PhysX 5.6.1 and DirectX 12.
+A physics simulation research platform built on NVIDIA PhysX 5.x with DirectX 12 real-time rendering.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 ![DirectX](https://img.shields.io/badge/DirectX-12-green.svg)
+![PhysX](https://img.shields.io/badge/PhysX-5.6.1-76B900.svg)
 
 ## Features
 
-### Phase 1: Foundation (Completed ✅)
-- **Mesh Caching System**: Intelligent geometry caching for reduced GPU resource creation overhead
-- **ImGui Debug UI**: Real-time debug interface with:
-  - FPS and frame time monitoring
-  - PhysX statistics (actor counts, gravity control)
-  - Camera position tracking
-  - Mesh cache statistics
-  - GPU PhysX status indicator
-- **GPU PhysX Support**: CUDA acceleration support (when available)
-  - Automatic fallback to CPU if GPU not available
-  - Real-time status display in debug UI
+### Core Simulation
+- **PhysX 5.6.1 Integration** - Full support for rigid body dynamics, collision detection, and constraints
+- **GPU PhysX Support** - CUDA acceleration with automatic CPU fallback
+- **Real-time DirectX 12 Rendering** - GPU-accelerated visualization with ImGui interface
+- **Scene Management** - JSON-based scene definition and loading
+
+### Dynamic Bonding System
+A flexible system for creating and managing dynamic bonds between physics entities:
+
+- **Bonding Sites** - Define attachment points with position, direction, and valency
+- **Bond Formation Rules** - Pluggable rules for automatic bond creation:
+  - Proximity-based detection
+  - Directional alignment
+  - Valency constraints
+  - Coplanarity requirements
+  - Angle constraints
+- **Bond Types** - Multiple joint types supported:
+  - Rigid (Fixed joints)
+  - Compliant (Spring-damper)
+  - Hinged (Revolute)
+  - Ball-socket (Spherical)
+  - Prismatic (Linear)
+  - D6 (Fully configurable)
+
+### Batch Simulation System
+Tools for running multiple simulations and collecting statistics:
+
+- **Metrics Collection** - Track bond counts, kinetic energy, cluster sizes, ring formation
+- **Termination Conditions** - Timeout, steady-state detection (MSER), target conditions
+- **Data Export** - CSV and JSON output for analysis
+- **Replication** - Run multiple simulations with different seeds
 
 ### Rendering
 - DirectX 12 rendering pipeline
 - Blinn-Phong lighting model
 - Real-time camera controls (WASD + mouse)
 - Depth buffering and perspective projection
+- Mesh caching system for performance
 
-### Physics Simulation
-- NVIDIA PhysX 5.6.1 integration
-- Rigid body dynamics (boxes, spheres)
-- Collision detection
-- Ground plane with realistic friction
-- Configurable gravity
+### Debug UI (ImGui)
+- FPS and frame time monitoring
+- PhysX statistics (actor counts, gravity control)
+- Camera position tracking
+- Mesh cache statistics
+- GPU PhysX status indicator
 
 ## Requirements
 
@@ -66,8 +88,8 @@ Open `physx/compiler/vc17win64/PhysXSDK.sln` in Visual Studio and build the **De
 
 ```bash
 cd ..
-git clone https://github.com/YOUR_USERNAME/PhysXSample.git
-cd PhysXSample
+git clone https://github.com/YOUR_USERNAME/PhysXWorkbench.git
+cd PhysXWorkbench
 ```
 
 ### 4. Configure and Build
@@ -83,8 +105,16 @@ cmake --build . --config Debug
 
 ```bash
 cd Debug
-PhysXSampleDX12.exe
+PhysXWorkbench.exe
 ```
+
+## Executables
+
+| Executable | Description |
+|------------|-------------|
+| `PhysXWorkbench.exe` | Main application with DX12 rendering and full features |
+| `PhysXWorkbenchConsole.exe` | Console-only version for headless simulation |
+| `PhysXWorkbenchOmniPVD.exe` | Version with OmniPVD debugging support |
 
 ## Controls
 
@@ -95,46 +125,87 @@ PhysXSampleDX12.exe
 | **Right Mouse Button + Drag** | Look around (FPS-style camera) |
 | **ESC** | Exit application |
 
-### ImGui Interface
-- **Gravity Slider**: Adjust gravity in real-time (Y-axis: -20.0 to 0.0)
-- **Statistics**: Monitor actors, FPS, and cache efficiency
-
 ## Project Structure
 
 ```
-PhysXSample/
+PhysXWorkbench/
 ├── src/
-│   ├── main_dx12.cpp           # Application entry point
-│   └── dx12/
-│       ├── DX12Renderer.h      # DirectX 12 renderer interface
-│       ├── DX12Renderer.cpp    # Renderer implementation
-│       └── d3dx12.h            # DirectX 12 helpers
+│   ├── main_dx12.cpp              # Main application entry point
+│   ├── dx12/                      # DirectX 12 renderer
+│   │   ├── DX12Renderer.h/cpp
+│   │   └── d3dx12.h
+│   ├── simulation/
+│   │   ├── bonding/               # Dynamic bonding system
+│   │   │   ├── BondableEntity.h/cpp
+│   │   │   ├── DynamicBondManager.h/cpp
+│   │   │   ├── BondFormationRules.h/cpp
+│   │   │   └── BondTypes.h/cpp
+│   │   ├── batch/                 # Batch simulation system
+│   │   │   ├── BatchSimulationRunner.h/cpp
+│   │   │   ├── CommonMetrics.h/cpp
+│   │   │   └── CommonTerminationConditions.h/cpp
+│   │   ├── SceneLoader.h/cpp
+│   │   └── SimulationRecorder.h/cpp
+│   └── CommandLineArgs.h/cpp
 ├── shaders/
-│   ├── PhysicsVS.hlsl          # Vertex shader (MVP transform)
-│   ├── PhysicsPS.hlsl          # Pixel shader (Blinn-Phong)
-│   ├── PBR_VS.hlsl             # PBR vertex shader (WIP)
-│   └── PBR_PS.hlsl             # PBR pixel shader (WIP)
+│   ├── PhysicsVS.hlsl             # Vertex shader
+│   └── PhysicsPS.hlsl             # Pixel shader (Blinn-Phong)
 ├── external/
-│   └── imgui/                  # Dear ImGui library
-├── CMakeLists.txt              # Build configuration
+│   └── imgui/                     # Dear ImGui library
+├── CMakeLists.txt
 └── README.md
 ```
 
-## Architecture
+## Usage Examples
 
-### DirectX 12 Pipeline
-1. **Device & Command Queue**: Low-level GPU control
-2. **Swap Chain**: Double-buffered rendering
-3. **Descriptor Heaps**: Resource binding (RTV, DSV, CBV, SRV for ImGui)
-4. **Pipeline State**: Vertex/pixel shaders, rasterizer, blend state
-5. **Root Signature**: Shader parameter layout
-6. **Mesh Caching**: Reusable geometry resources
+### Basic Usage
 
-### PhysX Integration
-- Foundation, Physics, Scene management
-- CPU Dispatcher (multi-threaded simulation)
-- CUDA Context Manager (optional GPU acceleration)
-- Material properties (friction, restitution)
+```bash
+# Run the main application
+./Debug/PhysXWorkbench.exe
+
+# Run with specific scene
+./Debug/PhysXWorkbench.exe --scene path/to/scene.json
+```
+
+### Batch Simulation (C++ API)
+
+```cpp
+#include "simulation/batch/BatchSimulationRunner.h"
+
+batch::BatchConfig config;
+config.numReplicates = 100;
+config.maxSimulationTime = 60.0f;
+
+batch::BatchSimulationRunner runner;
+runner.configure(config);
+runner.addMetric(std::make_shared<batch::BondCountMetric>(bondManager));
+runner.addTerminationCondition(std::make_shared<batch::SteadyStateCondition>(0.01f));
+
+auto results = runner.run(physics, sceneFactory);
+runner.exportToCSV(results, "results.csv");
+```
+
+### Dynamic Bonding (C++ API)
+
+```cpp
+#include "simulation/bonding/BondingIntegration.h"
+
+// Create bond manager
+auto bondManager = std::make_unique<bonding::DynamicBondManager>();
+bondManager->initialize(physics, scene);
+
+// Add formation rules
+bondManager->addRule(std::make_unique<bonding::ProximityRule>(1.0f));
+bondManager->addRule(std::make_unique<bonding::DirectionalAlignmentRule>(0.8f));
+bondManager->addRule(std::make_unique<bonding::ValencyRule>());
+
+// Register bond type
+bondManager->registerBondType(std::make_unique<bonding::CompliantBondType>(1000.0f, 10.0f));
+
+// Update each frame
+bondManager->update(deltaTime);
+```
 
 ## Troubleshooting
 
@@ -142,16 +213,11 @@ PhysXSample/
 - Ensure you have a CUDA-capable NVIDIA GPU
 - PhysX must be built with GPU support enabled
 - Required DLLs: PhysXGpu_64.dll, PhysXDevice64.dll
-- These are generated when PhysX is built with PX_GENERATE_GPU_PROJECTS=1
 
 ### Application Crashes on Startup
 - Verify PhysX DLLs are in the executable directory
 - Check shader files are in ../shaders/ relative to executable
 - Ensure DirectX 12 drivers are up to date
-
-### ImGui Not Responding to Input
-- Fixed in latest version with WantCaptureKeyboard/WantCaptureMouse checks
-- Rebuild the project
 
 ## License
 
@@ -159,9 +225,9 @@ MIT License - See LICENSE file for details
 
 ## Acknowledgments
 
-- **NVIDIA PhysX**: Physics simulation engine
-- **Dear ImGui**: Immediate mode GUI library
-- **Microsoft DirectX 12**: Graphics API
+- **NVIDIA PhysX** - Physics simulation engine
+- **Dear ImGui** - Immediate mode GUI library
+- **Microsoft DirectX 12** - Graphics API
 
 ## Contributing
 

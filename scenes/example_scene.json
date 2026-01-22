@@ -1,0 +1,70 @@
+{
+  "name": "Example Joint Chain Scene",
+  "description": "Demonstrates different joint types with box and sphere actors",
+  "gravity": [0, -9.81, 0],
+  "actors": [
+    {
+      "name": "ground",
+      "type": "static",
+      "geometry": "plane",
+      "position": [0, 0, 0]
+    },
+    {
+      "name": "box1",
+      "type": "dynamic",
+      "geometry": "box",
+      "position": [0, 10, 0],
+      "halfExtents": [1.0, 0.5, 0.5],
+      "density": 1.0,
+      "friction": 0.5,
+      "restitution": 0.3
+    },
+    {
+      "name": "box2",
+      "type": "dynamic",
+      "geometry": "box",
+      "position": [2.5, 10, 0],
+      "halfExtents": [1.0, 0.5, 0.5],
+      "density": 1.0,
+      "friction": 0.5,
+      "restitution": 0.3
+    },
+    {
+      "name": "box3",
+      "type": "dynamic",
+      "geometry": "box",
+      "position": [5.0, 10, 0],
+      "halfExtents": [1.0, 0.5, 0.5],
+      "density": 1.0,
+      "friction": 0.5,
+      "restitution": 0.3
+    },
+    {
+      "name": "sphere1",
+      "type": "dynamic",
+      "geometry": "sphere",
+      "position": [0, 5, 5],
+      "radius": 0.5,
+      "density": 1.0,
+      "friction": 0.5,
+      "restitution": 0.6
+    }
+  ],
+  "joints": [
+    {
+      "name": "joint1_fixed",
+      "type": "fixed",
+      "actor1": "box1",
+      "actor2": "box2",
+      "breakable": true,
+      "breakForce": 1000.0
+    },
+    {
+      "name": "joint2_spherical",
+      "type": "spherical",
+      "actor1": "box2",
+      "actor2": "box3",
+      "limitEnabled": true
+    }
+  ]
+}

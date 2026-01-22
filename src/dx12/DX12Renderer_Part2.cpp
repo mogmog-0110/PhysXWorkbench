@@ -186,8 +186,8 @@ void DX12Renderer::WaitForGPU()
 
         if (fence->GetCompletedValue() < fenceValue)
         {
-            ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent));
-            WaitForSingleObject(fenceEvent, INFINITE);
+            ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent.Get()));
+            WaitForSingleObject(fenceEvent.Get(), INFINITE);
         }
 
         fenceValues[frameIndex]++;
@@ -203,8 +203,8 @@ void DX12Renderer::MoveToNextFrame()
 
     if (fence->GetCompletedValue() < fenceValues[frameIndex])
     {
-        ThrowIfFailed(fence->SetEventOnCompletion(fenceValues[frameIndex], fenceEvent));
-        WaitForSingleObject(fenceEvent, INFINITE);
+        ThrowIfFailed(fence->SetEventOnCompletion(fenceValues[frameIndex], fenceEvent.Get()));
+        WaitForSingleObject(fenceEvent.Get(), INFINITE);
     }
 
     fenceValues[frameIndex] = currentFenceValue + 1;

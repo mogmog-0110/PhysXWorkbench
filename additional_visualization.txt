@@ -1,0 +1,209 @@
+
+//=============================================================================
+// Additional Visualization Methods
+//=============================================================================
+
+void DX12Renderer::RenderVelocityVectors(PxScene* scene)
+{
+    if (!scene) return;
+
+    PxU32 nbActors = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    if (nbActors == 0) return;
+
+    std::vector<PxRigidActor*> actors(nbActors);
+    scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC,
+                     reinterpret_cast<PxActor**>(&actors[0]), nbActors);
+
+    for (PxU32 i = 0; i < nbActors; i++)
+    {
+        PxRigidDynamic* dynamicActor = actors[i]->is<PxRigidDynamic>();
+        if (!dynamicActor) continue;
+
+        PxVec3 velocity = dynamicActor->getLinearVelocity();
+        float speed = velocity.magnitude();
+
+        if (speed < 0.1f) continue;  // Skip slow-moving objects
+
+        PxTransform transform = dynamicActor->getGlobalPose();
+        XMFLOAT3 start(transform.p.x, transform.p.y, transform.p.z);
+        XMFLOAT3 end(
+            start.x + velocity.x * m_velocityScale,
+            start.y + velocity.y * m_velocityScale,
+            start.z + velocity.z * m_velocityScale
+        );
+
+        // Color based on speed
+        XMFLOAT3 color;
+        if (speed < 5.0f)
+        {
+            color = XMFLOAT3(0.0f, 0.5f, 1.0f); // Blue for slow
+        }
+        else if (speed < 15.0f)
+        {
+            color = XMFLOAT3(1.0f, 1.0f, 0.0f); // Yellow for medium
+        }
+        else
+        {
+            color = XMFLOAT3(1.0f, 0.0f, 0.0f); // Red for fast
+        }
+
+        // Create and render the velocity arrow
+        auto lineMesh = std::make_unique<RenderMesh>(CreateLineMesh(start, end, color));
+
+        XMMATRIX world = XMMatrixIdentity();
+        UpdateConstantBuffer(world);
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+        commandList->IASetVertexBuffers(0, 1, &lineMesh->vertexBufferView);
+        commandList->IASetIndexBuffer(&lineMesh->indexBufferView);
+        commandList->DrawIndexedInstanced(lineMesh->indexCount, 1, 0, 0, 0);
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        dynamicMeshCache[frameIndex].push_back(std::move(lineMesh));
+    }
+}
+
+void DX12Renderer::AddCollisionPoint(const PxVec3& point, float impulse)
+{
+    CollisionPoint cp;
+    cp.position = XMFLOAT3(point.x, point.y, point.z);
+    cp.impulse = impulse;
+    cp.timeStamp = static_cast<float>(ImGui::GetTime());
+    m_collisionPoints.push_back(cp);
+}
+
+void DX12Renderer::RenderCollisionPoints()
+{
+    float currentTime = static_cast<float>(ImGui::GetTime());
+
+    // Remove old collision points
+    m_collisionPoints.erase(
+        std::remove_if(m_collisionPoints.begin(), m_collisionPoints.end(),
+            [this, currentTime](const CollisionPoint& cp) {
+                return (currentTime - cp.timeStamp) > m_collisionDisplayDuration;
+            }),
+        m_collisionPoints.end()
+    );
+
+    // Render collision point spheres
+    for (const auto& cp : m_collisionPoints)
+    {
+        float age = currentTime - cp.timeStamp;
+        float alpha = 1.0f - (age / m_collisionDisplayDuration);
+
+        // Color based on impulse magnitude
+        XMFLOAT3 color;
+        if (cp.impulse < 10.0f)
+        {
+            color = XMFLOAT3(0.0f, 1.0f * alpha, 0.0f);
+        }
+        else if (cp.impulse < 50.0f)
+        {
+            color = XMFLOAT3(1.0f * alpha, 1.0f * alpha, 0.0f);
+        }
+        else
+        {
+            color = XMFLOAT3(1.0f * alpha, 0.0f, 0.0f);
+        }
+
+        // Create small sphere at collision point
+        PxSphereGeometry sphereGeom(0.1f);
+        auto sphereMesh = GetOrCreateSphereMesh(sphereGeom, color);
+
+        XMMATRIX world = XMMatrixTranslation(cp.position.x, cp.position.y, cp.position.z);
+        UpdateConstantBuffer(world);
+
+        commandList->IASetVertexBuffers(0, 1, &sphereMesh->vertexBufferView);
+        commandList->IASetIndexBuffer(&sphereMesh->indexBufferView);
+        commandList->DrawIndexedInstanced(sphereMesh->indexCount, 1, 0, 0, 0);
+    }
+}
+
+void DX12Renderer::UpdateTrajectories(PxScene* scene, float deltaTime)
+{
+    if (!scene) return;
+
+    float currentTime = static_cast<float>(ImGui::GetTime());
+
+    // Check if it's time to update trajectories
+    if (currentTime - m_lastTrajectoryUpdate < m_trajectoryUpdateInterval)
+        return;
+
+    m_lastTrajectoryUpdate = currentTime;
+
+    PxU32 nbActors = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    if (nbActors == 0) return;
+
+    std::vector<PxRigidActor*> actors(nbActors);
+    scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC,
+                     reinterpret_cast<PxActor**>(&actors[0]), nbActors);
+
+    for (PxU32 i = 0; i < nbActors; i++)
+    {
+        PxRigidDynamic* dynamicActor = actors[i]->is<PxRigidDynamic>();
+        if (!dynamicActor) continue;
+
+        uint32_t actorID = reinterpret_cast<uintptr_t>(dynamicActor) & 0xFFFFFFFF;
+        PxTransform transform = dynamicActor->getGlobalPose();
+
+        TrajectoryPoint point;
+        point.position = XMFLOAT3(transform.p.x, transform.p.y, transform.p.z);
+        point.timeStamp = currentTime;
+
+        // Create trajectory if it doesn't exist
+        if (m_trajectories.find(actorID) == m_trajectories.end())
+        {
+            Trajectory traj;
+            traj.actorID = actorID;
+            traj.color = XMFLOAT3(
+                0.2f + (actorID % 100) / 100.0f * 0.8f,
+                0.2f + ((actorID * 13) % 100) / 100.0f * 0.8f,
+                0.2f + ((actorID * 37) % 100) / 100.0f * 0.8f
+            );
+            m_trajectories[actorID] = traj;
+        }
+
+        m_trajectories[actorID].points.push_back(point);
+
+        // Remove old points
+        auto& points = m_trajectories[actorID].points;
+        points.erase(
+            std::remove_if(points.begin(), points.end(),
+                [this, currentTime](const TrajectoryPoint& tp) {
+                    return (currentTime - tp.timeStamp) > m_trajectoryMaxDuration;
+                }),
+            points.end()
+        );
+    }
+}
+
+void DX12Renderer::RenderTrajectories()
+{
+    for (auto& pair : m_trajectories)
+    {
+        const Trajectory& traj = pair.second;
+        if (traj.points.size() < 2) continue;
+
+        // Render trajectory as line segments
+        for (size_t i = 0; i < traj.points.size() - 1; i++)
+        {
+            XMFLOAT3 start = traj.points[i].position;
+            XMFLOAT3 end = traj.points[i + 1].position;
+
+            auto lineMesh = std::make_unique<RenderMesh>(CreateLineMesh(start, end, traj.color));
+
+            XMMATRIX world = XMMatrixIdentity();
+            UpdateConstantBuffer(world);
+
+            commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+            commandList->IASetVertexBuffers(0, 1, &lineMesh->vertexBufferView);
+            commandList->IASetIndexBuffer(&lineMesh->indexBufferView);
+            commandList->DrawIndexedInstanced(lineMesh->indexCount, 1, 0, 0, 0);
+
+            commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            dynamicMeshCache[frameIndex].push_back(std::move(lineMesh));
+        }
+    }
+}

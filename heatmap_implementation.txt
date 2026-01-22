@@ -1,0 +1,81 @@
+
+//=============================================================================
+// Heatmap Visualization Implementation
+//=============================================================================
+
+XMFLOAT3 DX12Renderer::CalculateHeatmapColor(float value, float minVal, float maxVal)
+{
+    // Clamp value to range
+    if (value < minVal) value = minVal;
+    if (value > maxVal) value = maxVal;
+
+    // Normalize to 0-1
+    float normalized = (value - minVal) / (maxVal - minVal);
+
+    // Create heat map gradient: Blue -> Cyan -> Green -> Yellow -> Red
+    XMFLOAT3 color;
+
+    if (normalized < 0.25f)
+    {
+        // Blue to Cyan
+        float t = normalized / 0.25f;
+        color = XMFLOAT3(0.0f, t, 1.0f);
+    }
+    else if (normalized < 0.5f)
+    {
+        // Cyan to Green
+        float t = (normalized - 0.25f) / 0.25f;
+        color = XMFLOAT3(0.0f, 1.0f, 1.0f - t);
+    }
+    else if (normalized < 0.75f)
+    {
+        // Green to Yellow
+        float t = (normalized - 0.5f) / 0.25f;
+        color = XMFLOAT3(t, 1.0f, 0.0f);
+    }
+    else
+    {
+        // Yellow to Red
+        float t = (normalized - 0.75f) / 0.25f;
+        color = XMFLOAT3(1.0f, 1.0f - t, 0.0f);
+    }
+
+    return color;
+}
+
+XMFLOAT3 DX12Renderer::GetHeatmapColorForActor(PxRigidActor* actor)
+{
+    if (!actor) return XMFLOAT3(0.5f, 0.5f, 0.5f);
+
+    // Only dynamic actors have velocity and kinetic energy
+    PxRigidDynamic* dynamicActor = actor->is<PxRigidDynamic>();
+    if (!dynamicActor)
+    {
+        // Static actors are rendered in gray
+        return XMFLOAT3(0.3f, 0.3f, 0.3f);
+    }
+
+    float value = 0.0f;
+
+    switch (m_heatmapMode)
+    {
+    case HeatmapMode::VELOCITY:
+    {
+        PxVec3 velocity = dynamicActor->getLinearVelocity();
+        value = velocity.magnitude();
+        break;
+    }
+    case HeatmapMode::KINETIC_ENERGY:
+    {
+        PxVec3 velocity = dynamicActor->getLinearVelocity();
+        float mass = dynamicActor->getMass();
+        float speed = velocity.magnitude();
+        value = 0.5f * mass * speed * speed;  // KE = 0.5 * m * v^2
+        break;
+    }
+    default:
+        return XMFLOAT3(0.5f, 0.5f, 0.5f);
+    }
+
+    return CalculateHeatmapColor(value, m_heatmapMin, m_heatmapMax);
+}

@@ -38,12 +38,15 @@ void DX12Renderer::RenderActor(PxRigidActor* actor, const XMFLOAT3& color)
     if (!actor) return;
 
     PxU32 nShapes = actor->getNbShapes();
+    if (nShapes == 0) return;
+
     std::vector<PxShape*> shapes(nShapes);
-    actor->getShapes(&shapes[0], nShapes);
+    actor->getShapes(shapes.data(), nShapes);
 
     for (PxU32 i = 0; i < nShapes; i++)
     {
         PxShape* shape = shapes[i];
+        if (!shape) continue;
 
         // Get transform
         PxTransform pxTransform = PxShapeExt::getGlobalPose(*shape, *actor);
